@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Text File Viewer</title>
+  <style>
+    :root{
+      --bg: #f3f6fb; --card:#ffffff; --muted:#6b7280; --accent:#4f46e5;
+      --glass: rgba(255,255,255,0.6);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; min-height:100vh; font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+      background: linear-gradient(180deg, #eef2ff 0%, var(--bg) 40%);
+      display:flex; align-items:center; justify-content:center; padding:28px;
+      color:#0f172a;
+    }
+    .wrap{width:100%; max-width:920px}
+    .card{
+      background:var(--card); border-radius:14px; padding:20px; box-shadow:0 8px 30px rgba(15,23,42,0.08);
+      border:1px solid rgba(15,23,42,0.04);
+    }
+    header{display:flex; align-items:center; gap:12px; margin-bottom:14px}
+    .logo{width:44px; height:44px; border-radius:10px; background:linear-gradient(135deg,#6366f1,#06b6d4); display:flex; align-items:center; justify-content:center; color:white; font-weight:700}
+    h1{font-size:18px; margin:0}
+    p.lead{margin:0; color:var(--muted); font-size:13px}
+
+    /* uploader area */
+    .drop{margin-top:14px; border:2px dashed rgba(99,102,241,0.18); padding:18px; border-radius:10px; display:flex; gap:12px; align-items:center; justify-content:space-between}
+    .left{display:flex; gap:12px; align-items:center}
+    .drop .info{min-width:0}
+    .drop strong{display:block}
+    .actions{display:flex; gap:8px}
+    .btn{background:var(--accent); color:white; border:none; padding:8px 12px; border-radius:8px; cursor:pointer; font-weight:600}
+    .btn.ghost{background:transparent; color:var(--accent); border:1px solid rgba(79,70,229,0.12)}
+    input[type=file]{display:none}
+
+    /* output */
+    .controls{display:flex; gap:8px; align-items:center; margin-top:14px}
+    .small{font-size:13px; color:var(--muted)}
+    .output{margin-top:12px; border-radius:10px; overflow:hidden; border:1px solid rgba(15,23,42,0.04)}
+    pre{margin:0; padding:16px; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, "Roboto Mono", monospace; font-size:13px; line-height:1.45; background: #fbfdff}
+    .toolbar{display:flex; gap:8px; align-items:center; padding:10px; background:linear-gradient(180deg, rgba(255,255,255,0.6), rgba(255,255,255,0.55)); border-bottom:1px solid rgba(15,23,42,0.03)}
+
+    .meta{font-size:13px; color:var(--muted)}
+    .file-name{font-weight:600}
+
+    /* responsive */
+    @media (max-width:560px){
+      .drop{flex-direction:column; align-items:flex-start}
+      header{gap:10px}
+      .controls{flex-direction:column; align-items:flex-start}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <div class="logo">TV</div>
+        <div>
+          <h1>Text File Viewer</h1>
+          <p class="lead">Upload a text (.txt) file, or drag & drop it here.The file content will be shown below.</p>
+        </div>
+      </header>
+
+      <div class="drop" id="dropZone">
+        <div class="left">
+          
+          <div class="info">
+            <strong id="dropTitle">Drag & drop your file here</strong>
+            <div class="small">Or choose a file supported: .txt </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <label class="btn" for="fileInput">Choose file</label>
+          <input id="fileInput" type="file" accept=".txt,text/plain" />
+          <button id="uploadBtn" class="btn ghost">Upload</button>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="meta">Selected: <span class="file-name" id="fileName">No file</span></div>
+        <div style="flex:1"></div>
+        <label class="small"><input type="checkbox" id="lineNums" /> Show line numbers</label>
+        
+        <button id="clearBtn" class="btn ghost">Clear</button>
+      </div>
+
+      <div class="output" id="outputWrap" style="display:none">
+        <div class="toolbar">
+          <div class="small">Preview (exact file content)</div>
+        </div>
+        <pre id="fileContent"> </pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const dropZone = document.getElementById('dropZone');
+    const dropTitle = document.getElementById('dropTitle');
+    const fileNameEl = document.getElementById('fileName');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const outputWrap = document.getElementById('outputWrap');
+    const fileContentEl = document.getElementById('fileContent');
+    const copyBtn = document.getElementById('copyBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const lineNums = document.getElementById('lineNums');
+
+    let selectedFile = null;
+    const MAX_BYTES = 5 * 1024 * 1024; // 5MB
+
+    // handle file selection
+    fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+    // drag & drop
+    ;['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, (e)=>{ e.preventDefault(); dropZone.style.borderColor='rgba(99,102,241,0.5)'; }))
+    ;['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, (e)=>{ e.preventDefault(); dropZone.style.borderColor='rgba(99,102,241,0.18)'; }))
+    dropZone.addEventListener('drop', (e)=>{ const f = e.dataTransfer.files; handleFiles(f); })
+
+    function handleFiles(files){
+      if(!files || files.length===0) return;
+      const f = files[0];
+      if(f.size > MAX_BYTES){ alert('File too large. Max 5MB.'); return; }
+      selectedFile = f;
+      fileNameEl.textContent = f.name;
+      dropTitle.textContent = 'File ready, click Upload to view';
+    }
+
+    // upload to server and show content
+    uploadBtn.addEventListener('click', async ()=>{
+      if(!selectedFile){ alert('Choose a file first'); return; }
+      const fd = new FormData(); fd.append('file', selectedFile);
+      uploadBtn.textContent = 'Uploading...'; uploadBtn.disabled=true;
+      try{
+        const resp = await fetch('/upload', { method:'POST', body: fd });
+        if(!resp.ok) throw new Error('Server error ' + resp.status);
+        const data = await resp.json();
+        showContent(data.content || '');
+      }catch(err){ alert('Upload failed: ' + err.message); }
+      uploadBtn.textContent = 'Upload'; uploadBtn.disabled=false;
+    });
+
+    // show content (with optional line numbers)
+    function showContent(text){
+      outputWrap.style.display = 'block';
+      setContent(text);
+    }
+
+    function setContent(text){
+      if(lineNums.checked){
+        const lines = text.split(/\r?\n/);
+        const numbered = lines.map((ln,i)=> String(i+1).padStart(3,' ')+" | "+ln).join('\n');
+        fileContentEl.textContent = numbered;
+      } else {
+        fileContentEl.textContent = text;
+      }
+    }
+
+    lineNums.addEventListener('change', ()=>{ setContent((fileContentEl.dataset.raw) || fileContentEl.textContent); });
+
+    // copy
+    copyBtn.addEventListener('click', async ()=>{
+      try{
+        await navigator.clipboard.writeText(fileContentEl.textContent);
+        copyBtn.textContent = 'Copied ✓';
+        setTimeout(()=> copyBtn.textContent='Copy',1200);
+      }catch(e){ alert('Copy failed: ' + e.message) }
+    });
+
+    // download
+    downloadBtn.addEventListener('click', ()=>{
+      const text = fileContentEl.textContent || '';
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = selectedFile ? selectedFile.name : 'file.txt';
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    });
+
+    // clear
+    clearBtn.addEventListener('click', ()=>{
+      selectedFile = null;
+      fileInput.value = '';
+      fileNameEl.textContent = 'No file';
+      dropTitle.textContent = 'Drag & drop your file here';
+      outputWrap.style.display = 'none';
+      fileContentEl.textContent = '';
+    });
+
+    // keep raw content safe (so toggling line numbers works)
+    const observer = new MutationObserver(()=>{ fileContentEl.dataset.raw = fileContentEl.textContent; });
+    observer.observe(fileContentEl, { childList:true, characterData:true, subtree:true });
+
+  </script>
+</body>
+</html>
